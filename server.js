@@ -1,9 +1,12 @@
-const express		=	require('express');
-const bodyParser	=	require('body-parser');
+const express			=	require('express')
+const bodyParser	=	require('body-parser')
+const bcrypt			= require('bcrypt-nodejs')
+const cors				= require('cors')
 
 const app	=	express();
 
 app.use(bodyParser.json());
+app.use(cors());
 
 const database	=
 {
@@ -23,7 +26,28 @@ const database	=
 		,	joined:		new Date()
 		}
 	]
+,	login:
+	[ { id: "123"
+		, hash: ''
+		, email: 'john@gmail.com'
+	  }
+	]
 }
+
+/*
+**  Pages we want to create as end-points:
+**
+
+/ 					--> res		=	this is working
+/signin				--> POST	=	success/fail
+/register			--> POST	=	user object
+/profile/:userId	-->	GET		=	user object
+/image				--> PUT		=	user object ??
+
+**
+**  We can use postman to be testing them.
+**
+*/
 
 app.get('/', (req, res)=> {
 //	res.send('this is working');
@@ -31,11 +55,24 @@ app.get('/', (req, res)=> {
 })
 
 app.post('/signin', (req, res)=> {
-	if	(	(database.users[0].email	===	req.body.email)
-		&&	(database.users[0].password	===	req.body.password)
-		)
+	console.log('signin request', req.body)
+
+	const { email, password } = req.body;
+
+/*
+	TO BE USED WHEN IMPLEMENTING DBS:
+	bcrypt.compare(password, null, null, function(err,hash) {
+		console.log('hashed password',hash);
+	})
+*/
+
+	if	(		(database.users[0].email		===	email)
+			&&	(database.users[0].password	===	password)
+			)
 	{
-		res.json('success');
+		console.log('signin response', database.users[0])
+
+		res.json(database.users[0]);
 	}
 	else
 	{
@@ -44,11 +81,13 @@ app.post('/signin', (req, res)=> {
 })
 
 app.post('/register', (req, res) => {
+	console.log('register request', req.body)
+
 	const { email, name, password } = req.body;
 
 	database.users.push(
-		{	id:			'125'
-		,	name:		name
+		{	id:				'125'
+		,	name:			name
 		,	email:		email
 		,	password:	password
 		,	entries:	0
@@ -56,10 +95,14 @@ app.post('/register', (req, res) => {
 		}
 	)
 
+	console.log('register response', database.users[database.users.length-1])
+
 	res.json(database.users[database.users.length-1]);
 })
 
 app.get('/profile/:id', (req, res) => {
+	console.log('profile request', req.params)
+
 	const { id }	=	req.params;
 	let found		=	false;
 
@@ -78,12 +121,14 @@ app.get('/profile/:id', (req, res) => {
 	}
 })
 
-app.post('/image', (req, res) => {
-	//	TODO:  	This whole chunk repeats code from app.get('/profile/:id'), so it is candidate to be sent to its own
-	//			function.
+app.put('/image', (req, res) => {
+	console.log('image request', req.body)
+
+	//	TODO: This whole chunk repeats code from app.get('/profile/:id'), so it is candidate
+	//  			to be sent to its own function.
 	//
 	const { id }	=	req.body;
-	let found		=	false;
+	let found			=	false;
 
 	database.users.forEach(user =>
 	{
@@ -104,17 +149,3 @@ app.post('/image', (req, res) => {
 app.listen(3000, ()=> {
 	console.log('app is running on port 3000');
 })
-
-/*
-
-Pages we want to create as end-points:
-
-/ 					--> res		=	this is working
-/signin				--> POST	=	success/fail
-/register			--> POST	=	user object
-/profile/:userId	-->	GET		=	user object
-/image				--> PUT		=	user object ??
-
-We can use postman to be testing them.
-
-*/
