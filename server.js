@@ -2,37 +2,22 @@ const express			=	require('express')
 const bodyParser	=	require('body-parser')
 const bcrypt			= require('bcrypt-nodejs')
 const cors				= require('cors')
+const knex        = require('knex')
+
+const db	= 	knex ({ client:     	'pg'
+     								, connection: 	{ host : '127.0.0.1'
+                      							, user : 'user'
+                      							, password : 'password'
+                      							, database : 'smart-brain'
+                      							}
+      							});
+
+console.log(db.select('*').from('users'))
 
 const app	=	express();
 
 app.use(bodyParser.json());
 app.use(cors());
-
-const database	=
-{
-	users:
-	[	{	id:			'123'
-		,	name:		'John'
-		,	email:		'john@gmail.com'
-		,	password:	'cookies'
-		,	entries:	0
-		,	joined:		new Date()
-		}
-	,	{	id:			'124'
-		,	name:		'Sally'
-		,	email:		'sally@gmail.com'
-		,	password:	'cookies'
-		,	entries:	0
-		,	joined:		new Date()
-		}
-	]
-,	login:
-	[ { id: "123"
-		, hash: ''
-		, email: 'john@gmail.com'
-	  }
-	]
-}
 
 /*
 **  Pages we want to create as end-points:
@@ -57,95 +42,128 @@ app.get('/', (req, res)=> {
 app.post('/signin', (req, res)=> {
 	console.log('signin request', req.body)
 
-	const { email, password } = req.body;
+	// 	This one does not need to be a transaction, as it is not doing changes on db.
+	//
+	db
+		.select('email', 'hash')
+		.from('login')
+		.where('email', '=', req.body.email)
+		.then(data => {
+			const isValid = bcrypt.compareSync(req.body.password, data[0].hash)
 
-/*
-	TO BE USED WHEN IMPLEMENTING DBS:
-	bcrypt.compare(password, null, null, function(err,hash) {
-		console.log('hashed password',hash);
-	})
-*/
-
-	if	(		(database.users[0].email		===	email)
-			&&	(database.users[0].password	===	password)
-			)
-	{
-		console.log('signin response', database.users[0])
-
-		res.json(database.users[0]);
-	}
-	else
-	{
-		res.status(400).json('Error logging in');
-	}
+			if (isValid)
+			{
+				return db
+								.select('*')
+								.from('users')
+								.where('email', '=', req.body.email)
+								.then(user => {
+									res.json(user[0])
+								})
+								.catch(err => res.status(400).json('unable to get user'))
+			}
+			else
+			{
+				res.status(400).json('wrong credentials')
+			}
+		})
+		.catch(err => res.status(400).json('wrong credentials'))
 })
 
+/*
+**  POST: /register	-	Handles the post request to register new users.
+*/
 app.post('/register', (req, res) => {
 	console.log('register request', req.body)
 
 	const { email, name, password } = req.body;
+	const hash = bcrypt.hashSync(password);
 
-	database.users.push(
-		{	id:				'125'
-		,	name:			name
-		,	email:		email
-		,	password:	password
-		,	entries:	0
-		,	joined:		new Date()
-		}
-	)
-
-	console.log('register response', database.users[database.users.length-1])
-
-	res.json(database.users[database.users.length-1]);
+	//	We need to execute a transaction, two queries with data from the first one that is
+	//  required in the second one, and if at least one of them fails, both must be rolled 
+	//  back.  The trick here is the use of db.transaction(), with the trx.commit and the
+	//	trx.rollback actions.
+	//
+	db
+		.transaction(trx => {
+			trx
+				.insert({	hash: 	hash
+								, email: 	email
+								})
+				.into('login')
+				.returning('email')
+				.then(loginEmail => {
+					return trx('users')
+									.returning('*')
+									.insert({ email:  loginEmail[0]
+													, name:   name
+													, joined: new Date()
+													})
+									.then(user => {
+										res.json(user[0]);
+									})
+				})
+				.then(trx.commit)
+				.catch(trx.rollback)
+		})
+		//.catch(err => res.status(400).json(err))					//  Replaced, this returns db info
+																												//    to user.
+		.catch(err => res .status(400)
+											.json('Unable to register')
+					)																							//	Safer, no sensitive data.
 })
 
+/*
+**  GET: /profile/:id 	- Handles the get request to obtain data from a specific user.
+*/
 app.get('/profile/:id', (req, res) => {
 	console.log('profile request', req.params)
 
 	const { id }	=	req.params;
-	let found		=	false;
 
-	database.users.forEach(user =>
-	{
-		if (user.id === id)
-		{
-			found	=	true;
-
-			return	res.json(user);
-		}
-	})
-	if	(!found)
-	{
-		res.status(404).json('no such user');
-	}
+	db.select('*')
+		.from('users')
+		.where(	{	id: id })
+		.then(user => {
+			//  Since empty results are still valid result, we have to analyse it here in order to
+			//  decide if we found the value (and return it), or send a 'not found' error message.
+			//
+			if  (user.length)
+			{
+				res.json(user[0])
+			}
+			else
+			{
+				res.status(400).json('Not found')
+			}
+		})
+		//
+		//  For any other errors, we still keep the catch here.
+		//
+		.catch(err => res.status(400).json('Error getting user'))
 })
 
+/*
+**  PUT: /image 	- Handles the put request to upload and process an image.
+*/
 app.put('/image', (req, res) => {
 	console.log('image request', req.body)
 
-	//	TODO: This whole chunk repeats code from app.get('/profile/:id'), so it is candidate
-	//  			to be sent to its own function.
-	//
 	const { id }	=	req.body;
-	let found			=	false;
 
-	database.users.forEach(user =>
-	{
-		if (user.id === id)
-		{
-			found	=	true;
-			user.entries++;
-
-			return	res.json(user.entries);
-		}
-	})
-	if	(!found)
-	{
-		res.status(404).json('no such user');
-	}
+	db('users')
+		.where('id', '=', id)
+		.increment('entries', 1)
+		.returning('entries')
+		.then(entries => {
+			res.json(entries[0])
+		})
+		.catch(err => res.status(400).json('Unable to get entries'))
 })
 
+/*
+**  We setup the app to listen on port 3000.
+*/
 app.listen(3000, ()=> {
 	console.log('app is running on port 3000');
 })
